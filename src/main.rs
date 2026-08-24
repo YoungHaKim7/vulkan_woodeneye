@@ -10,8 +10,15 @@
 // clipping/projection math produces window pixel-space line segments that are uploaded as vertex
 // data and rasterized with a line-list pipeline. Per-player split-screen viewports are done with
 // dynamic scissors instead of SDL clip rectangles.
+//
+// Deliberate deviations from the SDL version's gameplay:
+// - the map is a small cube (MAP_BOX_SCALE 4 instead of 16) and players spawn standing on the
+//   floor instead of falling into a huge box from mid-height,
+// - movement acceleration scales with the box size (see `update`),
+// - mouse look consumes winit's relative DeviceEvent::MouseMotion deltas with the original
+//   demo's sensitivity, instead of diffing absolute cursor positions.
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 use vulkano::{
     Validated, VulkanError, VulkanLibrary,
@@ -47,21 +54,22 @@ use vulkano::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalPosition,
-    event::{DeviceId, ElementState, KeyEvent, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
     window::{CursorGrabMode, Window, WindowId},
 };
 
-// Constants defining map size, player count, and drawing precision
-const MAP_BOX_SCALE: i32 = 16; // Size of the map box
+// Constants defining map size, player count, and drawing precision.
+// The original demo uses 16; 4 makes a small cube you can walk around in.
+const MAP_BOX_SCALE: i32 = 4;
 const MAP_BOX_EDGES_LEN: usize = 12 + (MAP_BOX_SCALE * 2) as usize; // Number of map edges
 const MAX_PLAYER_COUNT: usize = 4; // Maximum number of players
 const CIRCLE_DRAW_SIDES: usize = 32; // Number of sides for drawing circles
 
-// Mouse/keyboard rotation sensitivity, identical to the SDL version (per pixel of motion)
-const LOOK_SENSITIVITY: i64 = 0x00400000;
+// Mouse/keyboard rotation sensitivity, identical to the SDL version (per pixel of motion).
+// This is 0x00080000 in the original C demo; the larger 0x00400000 made look 8x too fast.
+const LOOK_SENSITIVITY: f64 = 524_288.0; // 0x00080000
 
 // Structure representing a player.
 // The SDL version stores raw u32 device IDs; winit uses its own `DeviceId` type instead.
@@ -165,7 +173,9 @@ fn update(players: &mut [Player], players_len: usize, dt_ns: u64) {
         let rate = 6.0; // Rate of drag
         let drag = (-time * rate).exp(); // Calculate drag factor
         let diff = 1.0 - drag; // Calculate difference factor
-        let mult = 60.0; // Movement multiplier
+        // Movement multiplier. The SDL version uses 60.0 for its 16-unit box; scaling it with
+        // the box size keeps the same feel inside the smaller cube (top speed = mult / rate).
+        let mult = 60.0 * MAP_BOX_SCALE as f64 / 16.0;
         let grav = 25.0; // Gravity acceleration
 
         // Calculate player's direction based on yaw and WASD input
@@ -238,10 +248,17 @@ fn update(players: &mut [Player], players_len: usize, dt_ns: u64) {
 fn init_players(players: &mut [Player], len: usize) {
     // Initialize player positions. Players are placed in a grid-like pattern.
     for i in 0..len {
-        players[i].pos[0] = 8.0 * if i & 1 != 0 { -1.0 } else { 1.0 };
-        players[i].pos[1] = 0.0;
+        players[i].radius = 0.5;
+        players[i].height = 1.5;
+
+        // Spawn halfway between the center and each wall, standing on the floor: `update`
+        // clamps y to height - scale, which is exactly the standing eye height, so nobody
+        // starts floating in mid-air.
+        let half = MAP_BOX_SCALE as f64 * 0.5;
+        players[i].pos[0] = half * if i & 1 != 0 { -1.0 } else { 1.0 };
+        players[i].pos[1] = players[i].height as f64 - MAP_BOX_SCALE as f64;
         players[i].pos[2] =
-            8.0 * if i & 1 != 0 { -1.0 } else { 1.0 } * if i & 2 != 0 { -1.0 } else { 1.0 };
+            half * if i & 1 != 0 { -1.0 } else { 1.0 } * if i & 2 != 0 { -1.0 } else { 1.0 };
 
         players[i].vel[0] = 0.0;
         players[i].vel[1] = 0.0;
@@ -253,9 +270,6 @@ fn init_players(players: &mut [Player], len: usize) {
             + if i & 2 != 0 { 0x40000000 } else { 0 };
 
         players[i].pitch = -0x08000000;
-
-        players[i].radius = 0.5;
-        players[i].height = 1.5;
 
         players[i].wasd = 0;
 
@@ -355,8 +369,12 @@ mod vs {
             layout(location = 0) out vec4 v_color;
 
             void main() {
+                // `position` is in window pixels with y pointing down, which is the same
+                // direction as Vulkan's NDC y axis, so it maps across directly. Do NOT apply
+                // the OpenGL-style y negation here: in Vulkan that flips the whole image
+                // upside down (floor at the top, ceiling at the bottom).
                 vec2 ndc = position / pc.resolution * 2.0 - 1.0;
-                gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
+                gl_Position = vec4(ndc.x, ndc.y, 0.0, 1.0);
                 v_color = color;
             }
         ",
@@ -470,8 +488,6 @@ fn build_scene(
         // SDL clip rect -> dynamic scissor rectangle
         let off_x = (hor_offset.round() as u32).min(win_w.saturating_sub(1));
         let off_y = (ver_offset.round() as u32).min(win_h.saturating_sub(1));
-        let off_x = off_x.min(win_w.saturating_sub(1));
-        let off_y = off_y.min(win_h.saturating_sub(1));
         let ext_x = (size_hor.round() as u32).clamp(1, win_w - off_x);
         let ext_y = (size_ver.round() as u32).clamp(1, win_h - off_y);
 
@@ -647,7 +663,6 @@ struct RenderContext {
     pipeline: Arc<GraphicsPipeline>,
     pipeline_layout: Arc<PipelineLayout>,
     viewport: Viewport,
-    last_cursor_pos: HashMap<DeviceId, PhysicalPosition<f64>>,
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
 }
@@ -891,7 +906,6 @@ impl ApplicationHandler for App {
             pipeline,
             pipeline_layout,
             viewport,
-            last_cursor_pos: HashMap::new(),
             recreate_swapchain: false,
             previous_frame_end,
         });
@@ -910,40 +924,6 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(_) => {
                 if let Some(rcx) = self.rcx.as_mut() {
                     rcx.recreate_swapchain = true;
-                }
-            }
-            WindowEvent::CursorMoved {
-                device_id,
-                position,
-                ..
-            } => {
-                // Equivalent of SDL's MouseMotion handling: relative motion rotates the player.
-                let last = self
-                    .rcx
-                    .as_mut()
-                    .and_then(|rcx| rcx.last_cursor_pos.insert(device_id, position));
-
-                let Some(last) = last else {
-                    // First movement from an unknown mouse: claim a free slot (like the SDL
-                    // version assigning mice to new players).
-                    self.claim_mouse(device_id);
-                    return;
-                };
-
-                let xrel = (position.x - last.x) as i64;
-                let yrel = (position.y - last.y) as i64;
-
-                if let Some(index) = self.whose_mouse(device_id) {
-                    // Invert xrel for correct left/right rotation
-                    self.players[index].yaw = self.players[index]
-                        .yaw
-                        .wrapping_add(((-xrel * LOOK_SENSITIVITY) as i32) as u32);
-
-                    // Invert yrel for correct up/down looking, clamped to prevent over-rotation
-                    let new_pitch = self.players[index]
-                        .pitch
-                        .wrapping_sub((yrel * LOOK_SENSITIVITY) as i32);
-                    self.players[index].pitch = new_pitch.clamp(-0x42000000, 0x42000000);
                 }
             }
             WindowEvent::MouseInput {
@@ -1004,6 +984,40 @@ impl ApplicationHandler for App {
                 self.redraw();
             }
             _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        // Equivalent of SDL's MouseMotion handling: relative motion rotates the player.
+        // Raw DeviceEvent::MouseMotion deltas are used instead of absolute cursor positions
+        // (diffed against the last position): with the cursor locked (Wayland) absolute
+        // positions stop updating, and when merely confined (X11) they clamp at the window
+        // edges, which stalls the view mid-turn. Raw deltas keep flowing in both cases.
+        let DeviceEvent::MouseMotion { delta } = event else {
+            return;
+        };
+
+        if self.whose_mouse(device_id).is_none() {
+            self.claim_mouse(device_id);
+        }
+
+        if let Some(index) = self.whose_mouse(device_id) {
+            let player = &mut self.players[index];
+            // Mouse right turns right, mouse down looks down (same signs as the SDL version),
+            // clamped to +/-90 degrees of pitch to prevent over-rotation.
+            let yaw_delta = (-delta.0 * LOOK_SENSITIVITY) as i32;
+            player.yaw = player.yaw.wrapping_add(yaw_delta as u32);
+
+            let pitch_delta = (delta.1 * LOOK_SENSITIVITY) as i32;
+            player.pitch = player
+                .pitch
+                .saturating_sub(pitch_delta)
+                .clamp(-0x40000000, 0x40000000);
         }
     }
 

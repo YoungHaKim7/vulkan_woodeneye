@@ -12,8 +12,9 @@
 // dynamic scissors instead of SDL clip rectangles.
 //
 // Deliberate deviations from the SDL version's gameplay:
-// - the map is a small cube (MAP_BOX_SCALE 4 instead of 16) and players spawn standing on the
-//   floor instead of falling into a huge box from mid-height,
+// - the map box is 20 units (MAP_BOX_SCALE), 125x the volume of the 4-cube this port started
+//   with, and players spawn standing on the floor instead of falling into a huge box from
+//   mid-height,
 // - movement acceleration scales with the box size (see `update`),
 // - mouse look consumes winit's relative DeviceEvent::MouseMotion deltas with the original
 //   demo's sensitivity, instead of diffing absolute cursor positions.
@@ -61,8 +62,9 @@ use winit::{
 };
 
 // Constants defining map size, player count, and drawing precision.
-// The original demo uses 16; 4 makes a small cube you can walk around in.
-const MAP_BOX_SCALE: i32 = 4;
+// The original demo uses 16. 20 grows the arena to 125x the volume of the earlier 4-cube
+// (5x longer per side), per the "more than 100 times" request.
+const MAP_BOX_SCALE: i32 = 20;
 const MAP_BOX_EDGES_LEN: usize = 12 + (MAP_BOX_SCALE * 2) as usize; // Number of map edges
 const MAX_PLAYER_COUNT: usize = 4; // Maximum number of players
 const CIRCLE_DRAW_SIDES: usize = 32; // Number of sides for drawing circles

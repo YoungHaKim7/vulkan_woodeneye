@@ -91,8 +91,7 @@ impl ApplicationHandler for App {
         let surface = Surface::from_window(&self.gpu.instance, &window).unwrap();
         let window_size = window.inner_size();
 
-        let (swapchain, images) =
-            create_swapchain(&self.gpu.device, &surface, window_size.into());
+        let (swapchain, images) = create_swapchain(&self.gpu.device, &surface, window_size.into());
 
         let render_pass = create_render_pass(&self.gpu.device, swapchain.image_format());
 
@@ -151,10 +150,10 @@ impl ApplicationHandler for App {
                 if state == ElementState::Pressed && self.whose_mouse(device_id).is_none() {
                     self.claim_mouse(device_id);
                 }
-                if state == ElementState::Pressed {
-                    if let Some(index) = self.whose_mouse(device_id) {
-                        shoot(index, &mut self.players, self.player_count);
-                    }
+                if state == ElementState::Pressed
+                    && let Some(index) = self.whose_mouse(device_id)
+                {
+                    shoot(index, &mut self.players, self.player_count);
                 }
             }
             WindowEvent::KeyboardInput {
@@ -390,7 +389,7 @@ impl App {
         // One draw call per split-screen region; the scissor replaces SDL's clip rect
         for region in &regions {
             builder
-                .set_scissor(0, [region.scissor.clone()].into_iter().collect())
+                .set_scissor(0, [region.scissor].into_iter().collect())
                 .unwrap();
             unsafe { builder.draw(region.vertex_count, 1, region.first_vertex, 0) }.unwrap();
         }

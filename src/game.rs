@@ -17,20 +17,24 @@ pub(crate) const LOOK_SENSITIVITY: f64 = 524_288.0; // 0x00080000
 // The SDL version stores raw u32 device IDs; winit uses its own `DeviceId` type instead.
 #[derive(Clone, Copy)]
 pub(crate) struct Player {
-    pub(crate) mouse: Option<DeviceId>,    // ID of the mouse associated with the player
+    pub(crate) mouse: Option<DeviceId>, // ID of the mouse associated with the player
     pub(crate) keyboard: Option<DeviceId>, // ID of the keyboard associated with the player
-    pub(crate) pos: [f64; 3],              // 3D position of the player (x, y, z)
-    pub(crate) vel: [f64; 3],              // 3D velocity of the player (x, y, z)
-    pub(crate) yaw: u32,                   // Horizontal rotation of the player (angle)
-    pub(crate) pitch: i32,                 // Vertical rotation of the player (angle)
-    pub(crate) radius: f32,                // Radius of the player's collision circle
-    pub(crate) height: f32,                // Height of the player
-    pub(crate) color: [u8; 3],             // RGB color of the player
-    pub(crate) wasd: u8,                   // Bitmask representing WASD key presses (Up, Left, Down, Right)
+    pub(crate) pos: [f64; 3],           // 3D position of the player (x, y, z)
+    pub(crate) vel: [f64; 3],           // 3D velocity of the player (x, y, z)
+    pub(crate) yaw: u32,                // Horizontal rotation of the player (angle)
+    pub(crate) pitch: i32,              // Vertical rotation of the player (angle)
+    pub(crate) radius: f32,             // Radius of the player's collision circle
+    pub(crate) height: f32,             // Height of the player
+    pub(crate) color: [u8; 3],          // RGB color of the player
+    pub(crate) wasd: u8, // Bitmask representing WASD key presses (Up, Left, Down, Right)
 }
 
 // Function to find a player by their mouse ID
-pub(crate) fn whose_mouse(mouse: DeviceId, players: &[Player], _players_len: usize) -> Option<usize> {
+pub(crate) fn whose_mouse(
+    mouse: DeviceId,
+    players: &[Player],
+    _players_len: usize,
+) -> Option<usize> {
     players.iter().position(|p| p.mouse == Some(mouse))
 }
 
@@ -76,11 +80,10 @@ pub(crate) fn shoot(shooter: usize, players: &mut [Player], players_len: usize) 
     let vz = -cos_yaw * cos_pitch;
 
     // Iterate through other players to check for hits
-    for i in 0..players_len {
+    for (i, target) in players.iter_mut().enumerate().take(players_len) {
         if i == shooter {
             continue; // Skip the shooter themselves
         }
-        let target = &mut players[i];
         let mut hit = 0; // Initialize hit counter for head and feet check
         for j in 0..2 {
             // Check head and feet
@@ -193,54 +196,54 @@ pub(crate) fn update(players: &mut [Player], players_len: usize, dt_ns: u64) {
 
 pub(crate) fn init_players(players: &mut [Player], len: usize) {
     // Initialize player positions. Players are placed in a grid-like pattern.
-    for i in 0..len {
-        players[i].radius = 0.5;
-        players[i].height = 1.5;
+    for (i, player) in players.iter_mut().enumerate().take(len) {
+        player.radius = 0.5;
+        player.height = 1.5;
 
         // Spawn halfway between the center and each wall, standing on the floor: `update`
         // clamps y to height - scale, which is exactly the standing eye height, so nobody
         // starts floating in mid-air.
         let half = MAP_BOX_SCALE as f64 * 0.5;
-        players[i].pos[0] = half * if i & 1 != 0 { -1.0 } else { 1.0 };
-        players[i].pos[1] = players[i].height as f64 - MAP_BOX_SCALE as f64;
-        players[i].pos[2] =
+        player.pos[0] = half * if i & 1 != 0 { -1.0 } else { 1.0 };
+        player.pos[1] = player.height as f64 - MAP_BOX_SCALE as f64;
+        player.pos[2] =
             half * if i & 1 != 0 { -1.0 } else { 1.0 } * if i & 2 != 0 { -1.0 } else { 1.0 };
 
-        players[i].vel[0] = 0.0;
-        players[i].vel[1] = 0.0;
-        players[i].vel[2] = 0.0;
+        player.vel[0] = 0.0;
+        player.vel[1] = 0.0;
+        player.vel[2] = 0.0;
 
         // The bitwise operations distribute the players around the origin.
-        players[i].yaw = 0x20000000
+        player.yaw = 0x20000000
             + if i & 1 != 0 { 0x80000000 } else { 0 }
             + if i & 2 != 0 { 0x40000000 } else { 0 };
 
-        players[i].pitch = -0x08000000;
+        player.pitch = -0x08000000;
 
-        players[i].wasd = 0;
+        player.wasd = 0;
 
-        players[i].mouse = None;
-        players[i].keyboard = None;
+        player.mouse = None;
+        player.keyboard = None;
 
         // Generate a variety of colors per player index (unchanged from the SDL version).
-        players[i].color[0] = if (1 << (i / 2)) & 2 != 0 { 0 } else { 0xff };
-        players[i].color[1] = if (1 << (i / 2)) & 1 != 0 { 0 } else { 0xff };
-        players[i].color[2] = if (1 << (i / 2)) & 4 != 0 { 0 } else { 0xff };
+        player.color[0] = if (1 << (i / 2)) & 2 != 0 { 0 } else { 0xff };
+        player.color[1] = if (1 << (i / 2)) & 1 != 0 { 0 } else { 0xff };
+        player.color[2] = if (1 << (i / 2)) & 4 != 0 { 0 } else { 0xff };
 
-        players[i].color[0] = if i & 1 != 0 {
-            players[i].color[0]
+        player.color[0] = if i & 1 != 0 {
+            player.color[0]
         } else {
-            !players[i].color[0]
+            !player.color[0]
         };
-        players[i].color[1] = if i & 1 != 0 {
-            players[i].color[1]
+        player.color[1] = if i & 1 != 0 {
+            player.color[1]
         } else {
-            !players[i].color[1]
+            !player.color[1]
         };
-        players[i].color[2] = if i & 1 != 0 {
-            players[i].color[2]
+        player.color[2] = if i & 1 != 0 {
+            player.color[2]
         } else {
-            !players[i].color[2]
+            !player.color[2]
         };
     }
 }

@@ -31,41 +31,40 @@ pub(crate) struct RegionGeometry {
 // Port of the original `draw_clipped_segment`, minus the actual drawing: returns the projected
 // 2D offsets from the viewport origin after clipping against the near plane z = -w.
 fn project_clipped_segment(
-    mut ax: f32,
-    mut ay: f32,
-    mut az: f32,
-    mut bx: f32,
-    mut by: f32,
-    mut bz: f32,
+    mut a: [f32; 3],
+    mut b: [f32; 3],
     z: f32,
     w: f32,
 ) -> Option<([f32; 2], [f32; 2])> {
     // Both points behind the clipping plane: nothing to draw
-    if az >= -w && bz >= -w {
+    if a[2] >= -w && b[2] >= -w {
         return None;
     }
 
-    let dx = ax - bx;
-    let dy = ay - by;
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
 
     // Clip the first point (A) if it's behind the clipping plane
-    if az > -w {
-        let t = (-w - bz) / (az - bz);
-        ax = bx + dx * t;
-        ay = by + dy * t;
-        az = -w;
+    if a[2] > -w {
+        let t = (-w - b[2]) / (a[2] - b[2]);
+        a[0] = b[0] + dx * t;
+        a[1] = b[1] + dy * t;
+        a[2] = -w;
     }
 
     // Clip the second point (B) if it's behind the clipping plane
-    if bz > -w {
-        let t = (-w - az) / (bz - az);
-        bx = ax - dx * t;
-        by = ay - dy * t;
-        bz = -w;
+    if b[2] > -w {
+        let t = (-w - a[2]) / (b[2] - a[2]);
+        b[0] = a[0] - dx * t;
+        b[1] = a[1] - dy * t;
+        b[2] = -w;
     }
 
     // Perspective projection: project the 3D points to 2D offsets
-    Some(([-z * ax / az, -z * ay / az], [-z * bx / bz, -z * by / bz]))
+    Some((
+        [-z * a[0] / a[2], -z * a[1] / a[2]],
+        [-z * b[0] / b[2], -z * b[1] / b[2]],
+    ))
 }
 
 // Builds all line-segment vertices for the current frame. This mirrors the original `draw`
@@ -164,7 +163,8 @@ pub(crate) fn build_scene(
                 + mat[7] * (line[4] as f64 - y0) as f32
                 + mat[8] * (line[5] as f64 - z0) as f32;
 
-            if let Some((pa, pb)) = project_clipped_segment(ax, ay, az, bx, by, bz, cam_origin, 1.0)
+            if let Some((pa, pb)) =
+                project_clipped_segment([ax, ay, az], [bx, by, bz], cam_origin, 1.0)
             {
                 // Convert to screen coordinates (same truncation as SDL Point::new)
                 vertices.push(LineVertex {
@@ -185,11 +185,10 @@ pub(crate) fn build_scene(
         }
 
         // Draw other players
-        for j in 0..players_len {
+        for (j, target) in players.iter().enumerate().take(players_len) {
             if i == j {
                 continue; // Don't draw the current player
             }
-            let target = &players[j];
             let color = [target.color[0], target.color[1], target.color[2], 255];
 
             // Draw the target player's top and bottom circles
